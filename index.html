@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binary Bitcoin Price Tracker</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: monospace;
+            background-color: #1a1a1a;
+            color: #00ff00;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #price-container {
+            position: relative;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transform: translateY(60px);
+        }
+
+        .price-entry {
+            height: 40px;
+            line-height: 40px;
+            font-size: 24px;
+            white-space: nowrap;
+            transition: transform 0.5s ease, opacity 0.5s ease;
+            position: absolute;
+            transform: translateY(0);
+            cursor: default;
+        }
+
+        .match {
+            color: gold;
+        }
+
+        .latest-entry {
+            position: relative;
+        }
+
+        .latest-entry:hover .hover-info {
+            display: block;
+        }
+
+        .hover-info {
+            display: none;
+            position: absolute;
+            left: 50%;
+            top: -45px;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            color: #00ff00;
+            padding: 10px 20px;
+            border: 1px solid #00ff00;
+            border-radius: 5px;
+            font-size: 18px;
+            white-space: nowrap;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="price-container"></div>
+    <script>
+        const priceContainer = document.getElementById('price-container');
+        const maxEntries = 100;
+        const entryHeight = 40;
+        let entries = [];
+
+        function toBinary(num, padTo17 = false) {
+            if (num === 0) return padTo17 ? "00000000000000000" : "0";
+            let binary = "";
+            let n = Math.abs(Math.floor(num));
+            while (n > 0) {
+                binary = (n % 2) + binary;
+                n = Math.floor(n / 2);
+            }
+            if (padTo17) {
+                return binary.padStart(17, '0');
+            }
+            return binary;
+        }
+
+        function formatTime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')} ET`;
+        }
+
+        function getSecondsSinceMidnightET() {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            return (hours * 3600) + (minutes * 60) + seconds;
+        }
+
+        async function fetchBitcoinPrice() {
+            try {
+                const response = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
+                const data = await response.json();
+                return Math.floor(parseFloat(data.data.amount));
+            } catch (error) {
+                console.error('Error fetching price:', error);
+                return 'Error';
+            }
+        }
+
+        function compareAndHighlight(price, time) {
+            let priceStr = price.split('').reverse();
+            let timeStr = time.split('').reverse();
+            let matchCount = 0;
+
+            while (matchCount < priceStr.length && matchCount < timeStr.length && 
+                   priceStr[matchCount] === timeStr[matchCount]) {
+                matchCount++;
+            }
+
+            if (matchCount === 0) {
+                return `${price} @ ${time}`;
+            }
+
+            const priceHighlighted = price.slice(0, -matchCount) + 
+                                   `<span class="match">${price.slice(-matchCount)}</span>`;
+            const timeHighlighted = time.slice(0, -matchCount) + 
+                                  `<span class="match">${time.slice(-matchCount)}</span>`;
+
+            return `${priceHighlighted} @ ${timeHighlighted}`;
+        }
+
+        function updateEntryPositions() {
+            entries.forEach((entry, index) => {
+                const offset = index * entryHeight;
+                entry.style.transform = `translateY(${-offset}px)`;
+                const opacity = Math.max(0.2, 1 - (index * 0.1));
+                entry.style.opacity = opacity;
+                
+                // Remove latest-entry class from all entries
+                entry.classList.remove('latest-entry');
+            });
+            
+            // Add latest-entry class to the most recent entry
+            if (entries.length > 0) {
+                entries[0].classList.add('latest-entry');
+            }
+        }
+
+        function addPriceToDisplay(price) {
+            if (price === 'Error') return;
+
+            const secondsSinceMidnight = getSecondsSinceMidnightET();
+            const binaryPrice = toBinary(price);
+            const binaryTime = toBinary(secondsSinceMidnight, true);
+            
+            const entry = document.createElement('div');
+            entry.className = 'price-entry';
+            
+            // Create hover info
+            const hoverInfo = document.createElement('div');
+            hoverInfo.className = 'hover-info';
+            hoverInfo.textContent = `$${price.toLocaleString()} @ ${formatTime(secondsSinceMidnight)}`;
+            
+            entry.innerHTML = compareAndHighlight(binaryPrice, binaryTime);
+            entry.appendChild(hoverInfo);
+            
+            priceContainer.appendChild(entry);
+            entries.unshift(entry);
+
+            if (entries.length > maxEntries) {
+                const removed = entries.pop();
+                priceContainer.removeChild(removed);
+            }
+
+            updateEntryPositions();
+        }
+
+        async function updatePrice() {
+            const price = await fetchBitcoinPrice();
+            addPriceToDisplay(price);
+        }
+
+        // Initial update
+        updatePrice();
+
+        // Set up interval to update exactly on the second
+        function setupPreciseInterval() {
+            const now = new Date();
+            const delay = 1000 - now.getMilliseconds();
+
+            setTimeout(() => {
+                updatePrice();
+                setInterval(updatePrice, 1000);
+            }, delay);
+        }
+
+        setupPreciseInterval();
+    </script>
+</body>
+</html>
